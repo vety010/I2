@@ -1,0 +1,283 @@
+os.loadAPI("hook")
+os.loadAPI("utils")
+
+term.setCursorBlink(true)
+
+local w, h = term.getSize()
+
+function reset()
+    term.clear() 
+
+    term.setCursorPos(1, 1)
+    print("SCP INTRANET TERMINAL BY OKROSHKA. RCTRL TO EXIT")
+
+    term.setCursorPos(1, h)
+    term.write("> ")
+end
+
+local commandTree = {
+    lockdown = {
+        active = false,
+
+        start = function()
+            print("Starting the lockdown...")
+            setCMDVar("lockdown active", true)
+        end,
+        
+        ["end"] = function()
+            print("Ending the lockdown...")
+            setCMDVar("lockdown active", false)
+        end,
+    },
+    breach = {
+        active = false,
+
+        start = function()
+            print("Starting the breach mode...")
+            setCMDVar("breach active", true)
+        end,
+        
+        ["end"] = function()
+            print("Ending the breach mode...")
+            setCMDVar("breach active", false)
+        end,
+    },
+    power = {
+        state = "off"
+    },
+    tests = {
+        args = function(args)
+            for k, v in pairs(args) do
+                print(tostring(k) .. " = " .. tostring(v))
+            end
+        end,
+    
+        num = 23,
+        str = "hello, world!",
+
+        setvar = function(args, a1)
+            setCMDVar("tests num", a1)
+            print("Set!")
+        end,
+        getvar = function()
+            print("Value: "..getCMDVar("tests num"))
+        end
+    }
+}
+
+-- Callback arguments:
+-- k - current key (any, usually string)
+-- v - current value (any)
+-- depth - current depth (number)
+-- parent - "parent[k]" is the "v" value
+-- path - entire path (table)
+-- 
+-- 1st argument: true if we need to go a level deeper, false otherwise.
+-- 2nd argument: any result to be returned as the result of traversing
+function traverseCMDTree(str, callback)
+    local path = splitBySpaces(str)
+    local depth = 0
+    local current = commandTree
+
+    while true do
+        depth = depth + 1
+
+        if depth > 20 then
+            print("Invalid path length")
+            return nil
+        end
+
+        if not path[depth] then
+            print("Incomplete path!")
+            return nil
+        end
+
+        local k = path[depth]
+        local v = current[k]
+
+        local deeper, result = callback(k, v, depth, current, path)
+        
+        if deeper then 
+            current = v
+        else
+            return result 
+        end
+    end
+end
+
+function setCMDVar(path, value)
+    traverseCMDTree(path, function(k, v, depth, current, path)
+        if depth == #path then
+            current[k] = value
+
+            return false, value
+        end
+
+        return true
+    end)
+end
+
+function getCMDVar(path)
+    return traverseCMDTree(path, function(k, v, depth, current, path)
+        if depth == #path then
+            return false, current[k]
+        end
+        
+        return true
+    end)
+end
+
+function parseCommand(str)
+    traverseCMDTree(str, function(k, v, depth, current, path)
+        if type(v) == "table" then
+            return true
+        elseif type(v) == "function" then
+            local args = {}
+
+            for i = depth + 1, #path do
+                table.insert(args, path[i])
+            end
+
+            return false, v(args, unpack(args))
+        elseif type(v) == "boolean" then
+            print("[VAR] Value of "..k.." is "..(v and "true" or "false").." (boolean)")
+            
+            return false, v
+        elseif type(v) == "number" then
+            print("[VAR] Value of "..k.." is "..v.." (number)")
+            
+            return false, v
+        elseif type(v) == "string" then
+            print("[VAR] Value of "..k.." is "..v.." (string)")
+            
+            return false, v
+        else
+            print("Not recognized as directory, command or variable (step '"..k.."').")
+        end
+        
+        return false, nil
+    end)
+end
+
+local numbers = {
+    zero = 0,
+    one = 1,
+    two = 2,
+    three = 3,
+    four = 4,
+    five = 5,
+    six = 6,
+    seven = 7,
+    eight = 8,
+    nine = 9
+}
+
+local memory = {
+    terminal = {
+        str = "",
+        awaitingConfirm = false
+    }
+}
+
+function printStats()
+    local cx, cy = term.getCursorPos()
+
+    local linesCount = 4
+
+    -- Clearing lines needed for correct display
+    for i = 2, 4 do
+        term.setCursorPos(1, i)
+        term.clearLine()
+    end
+
+    -- Set cursor to start
+    term.setCursorPos(1, 2)
+
+    local isBreach = getCMDVar("breach active")
+    local isLockdown = getCMDVar("lockdown active")
+    local powerState = getCMDVar("power state")
+
+    print("Breach mode: "..(isBreach and "YES" or "NO"))
+    print("Lockdown mode: "..((isBreach or isLockdown) and "YES" or "NO"))
+    print("Power: "..string.upper(powerState))
+    if isBreach and not isLockdown then
+        print("LOCKDOWN WAS ISSUED BECAUSE OF THE BREACH")
+    end
+    
+    -- Return cursor afterwards
+    term.setCursorPos(cx, cy)
+end
+
+function rerenderStats()
+    if memory.terminal.awaitingConfirm then return end
+
+    printStats()
+end
+
+reset()
+printStats()
+
+function onKey(key, is_held)
+    local k = keys.getName(key)
+
+    local cursorX, cursorY = term.getCursorPos()
+
+    if k and #k == 1 and not is_held then
+        memory.terminal.str = memory.terminal.str .. k
+        term.write(k)
+    elseif numbers[k] and not is_held then
+        memory.terminal.str = memory.terminal.str .. numbers[k]
+        term.write(numbers[k])
+    elseif k == "enter" then
+        if memory.terminal.awaitingConfirm then
+            -- Resetting state
+            memory.terminal.awaitingConfirm = false
+
+            -- Clearing
+            memory.terminal.str = ""
+            reset()
+            printStats()
+        else
+            reset()
+            -- Set cursor to start
+            term.setCursorPos(1, 2)
+            -- Parse the command
+            parseCommand(memory.terminal.str)
+            -- Set bottom text to "awaiting confirm"
+            term.setCursorPos(1, h)
+            term.clearLine()
+            term.write("COMMAND EXECUTED. ENTER TO RETURN")
+            -- And await the confirmation
+            memory.terminal.awaitingConfirm = true
+        end
+    elseif k == "backspace" and cursorX > 3 then
+        -- Remove one symbol from the input
+        memory.terminal.str = string.sub(memory.terminal.str, 1, -2)
+        -- Set cursor pos back one symbol
+        term.setCursorPos(cursorX - 1, h)
+        -- Sets the symbol to empty (space)
+        term.write(" ")
+        -- Set cursor pos back one symbol again
+        term.setCursorPos(cursorX - 1, h)
+    elseif k == "space" then
+        memory.terminal.str = memory.terminal.str .. " "
+        term.write(" ")
+    -- elseif k == "rightCtrl" then
+    elseif key == 157 then -- Right control. For some reason does not have a nice name.
+        -- Reset carriage before exit
+        term.setCursorPos(1, h - 1)
+        -- Print the exited text, clearing the lines beforehand
+        term.clearLine()
+        print("-- EXITED")
+        term.clearLine()
+        
+        hook.run("stopProgramExecution")
+    end
+end
+
+hook.add("onEvent_key", "cli", onKey)
+hook.add("second", "cli", rerenderStats)
+
+tick = tick
+get = getCMDVar
+set = setCMDVar

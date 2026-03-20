@@ -1,0 +1,19 @@
+os.loadAPI("/disk/libs/hook")
+os.loadAPI("/disk/libs/events")
+os.loadAPI("/disk/net/base/i2")
+os.loadAPI("/disk/net/i2_prettyprint")
+
+i2.init("router")
+
+local ticks = 0
+local out_device = peripheral.find("monitor")
+hook.add("tick", "printer", function()
+     ticks = ticks + 1
+
+     if ticks > 10 then
+          i2_prettyprint.printGeneral(out_device, i2)
+          ticks = 0
+     end
+end)
+
+events.startThinking()

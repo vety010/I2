@@ -1,0 +1,47 @@
+os.loadAPI("/disk/libs/utils")
+
+-- Events:
+-- i2.request       -- Request
+-- i2.response      -- Response
+-- i2.error         -- Error 
+
+switch = nil
+router = nil
+
+function init(mode)
+     -- Always we need a switch for basic networking
+     os.loadAPI("/disk/net/base/i2_switch")
+     switch = i2_switch
+     switch.MAC = MAC
+     
+     if mode == "router" then
+          os.loadAPI("/disk/net/base/i2_router")
+          router = i2_router
+          switch.router = router
+     end  
+end
+
+function request(sourcePort, destination, destinationPort, body)
+     switch.onPacket("R", MAC, sourcePort, destination, destinationPort, body)
+end
+
+-- To be called whenever this device received a packet
+function switch.onInboundPacket(fromNIC, packetType, source, nextHop, destination, body)
+     -- We received an inbound request packet that has us as the destination. That, usually, means a request to us.
+     if packetType == "R" then
+          hook.run("i2.request", src, srcPort, dst, dstPort, body)
+          return
+     end
+
+     -- We received an inbound response packet that originated from us. That, usually, means a response for us.
+     if packetType == "A" then
+          hook.run("i2.response", src, srcPort, dst, dstPort, body)
+          return
+     end
+     
+     -- We received an inbound error packet that originated from us. That, usually, means an error that wsa returned to us.
+     if packetType == "E" then
+          hook.run("i2.error", src, srcPort, dst, dstPort, body)
+          return
+     end
+end

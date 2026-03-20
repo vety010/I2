@@ -1,0 +1,11 @@
+os.loadAPI("/disk/libs/events")
+os.loadAPI("/disk/libs/hook")
+os.loadAPI("/disk/net/base/i2")
+
+hook.add("onEvent.key", "test", function(key, is_held)
+     i2.send("User pressed a key: " .. key)
+     print("Sent!")
+end)
+
+i2.init()
+events.startThinking()

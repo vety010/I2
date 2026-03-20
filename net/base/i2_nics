@@ -1,0 +1,149 @@
+local metatable = {}
+local existingNICs = {}
+
+local I2_CHANNEL = 0
+
+-- HOOKS:
+--   i2.NICs.inbound_packet   -- called whenever a NIC has received inbound traffic
+--   i2.NICs.registered       -- called whenever a NIC was registered
+--   i2.NICs.unregistered     -- called whenever a NIC was unregistered
+
+---------------------------------
+--   NIC METATABLE FUNCTIONS   --
+---------------------------------
+
+-- If isVirtual is true, side actually acts as the ID of the virtual interface
+function metatable:initialize(isVirtual, side)
+     self.virtual = isVirtual
+     
+     if not isVirtual then
+          self.peripheral = peripheral.wrap(side)
+          
+          -- Init I2 channel
+          self.peripheral.open(I2_CHANNEL)
+     end
+     
+     self.side = side
+     existingNICs[side] = self
+end
+
+-- Called whenever NIC has to be destroyed.
+function metatable:destroy()
+     existingNICs[self.side] = nil
+end
+
+function metatable:setOpponentsMAC(mac)
+     self.link_mac = mac
+end
+
+function metatable:getOpponentsMAC()
+     return self.link_mac
+end
+
+-- Sends a packet via this NIC, also has the origin NIC for routing purposes
+-- To be overridden.
+function metatable:send(originNIC, packetType, source, nextHop, destination, packet)
+     if self.virtual then return end
+
+     self.peripheral.transmit(I2_CHANNEL, I2_CHANNEL, self:packPacket(packetType, source, nextHop, destination, packet))
+end
+
+-- Whenever this NIC receives an external packet
+-- Usually should not be overridden
+function metatable:receive(packetType, src, nextHop, dst, body)
+     hook.run("i2.NICs.inbound_packet", self, packetType, src, nextHop, dst, body)
+end
+
+-- Packs packet data into the formatted string
+function metatable:packPacket(packetType, source, nextHop, destination, packet)
+     return tostring(packetType or "-") .. ">" .. tostring(source or "-") .. ">" .. tostring(nextHop or "-") .. ">" .. tostring(destination or "-") .. ">" .. tostring(packet or "")
+end
+
+metatable.__index = metatable
+
+---------------------------------------
+--   GLOBAL NIC HANDLING FUNCTIONS   --
+---------------------------------------
+
+function getAll()
+     return existingNICs
+end
+
+function getAtSide(side)
+     return getAll()[side]
+end
+
+function updateNICs()
+     -- Checking NICs that are no longer active
+     local toBeRemoved = {}
+     for side, nic in pairs(existingNICs) do
+          if not peripheral.isPresent(side) then
+               table.insert(toBeRemoved, side)
+          end  
+     end
+
+     -- Removing any inactive NICs
+     for k, v in ipairs(toBeRemoved) do 
+          unregisterNIC(v)
+     end
+
+     -- Adding any new NICs
+     for k, v in pairs(peripheral.getNames()) do
+          if peripheral.getType(v) == "modem" and not existingNICs[v] then
+               registerNIC(v, false)
+          end
+     end
+
+     return nil
+end
+
+function registerNIC(side, isVirtual)
+     print("[I2] Registering NIC: "..side)
+
+     if getAtSide(side) then 
+          unregisterNIC(side)
+     end
+
+     -- Creating a NIC object
+     local NIC = {}
+     setmetatable(NIC, metatable)
+     NIC:initialize(isVirtual, side)
+
+     hook.run("i2.NICs.registered", side, NIC)
+
+     return NIC
+end
+
+function unregisterNIC(side)
+     local NIC = getAtSide(v)
+     if not NIC then return end
+
+     print("[I2] Unregistering NIC: "..v)
+     NIC:destroy()
+
+     hook.run("i2.NICs.unregistered", side)
+end
+
+hook.add("tick", "i2.NICs.peripheral_check", updateNICs)
+
+hook.add("onEvent.modem_message", "i2.NIC.receive", function(side, channel, replyChannel, message, distance)
+     if channel ~= I2_CHANNEL or replyChannel ~= I2_CHANNEL then return end
+
+     local packetData = utils.split(message, ">")
+
+     local packetType, src, nextHop, dst = unpack(packetData)
+
+     if src == "-" then src = nil end
+     if nextHop == "-" then nextHop = nil end
+     if dst == "-" then dst = nil end
+
+     local body = ""
+     for i = 5, #packetData do
+          body = body .. packetData[i] .. (i == #packetData and "" or ">")
+     end
+
+     local NIC = existingNICs[side]
+     if NIC then
+          NIC:receive(packetType, src, nextHop, dst, body)
+     end
+end)

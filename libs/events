@@ -1,0 +1,61 @@
+os.loadAPI("/disk/libs/hook")
+
+-- ! INCLUDE THIS ONCE. THEN ONLY INCLUDE /disk/hook !!!
+
+--[[
+     Hook list:
+     onEvent - called on *any* event
+     onEvent_{eventName} - called on {eventName} event
+
+     tick - called roughly every tick
+     second - called roughly every 20 ticks
+     
+     stopProgramExecution - call this to quit program *at the end of the current tick*
+]]
+
+local stopProgram = false
+
+hook.add("stopProgramExecution", "_stopper", function()
+     stopProgram = true
+end)
+
+local ticksCounter = 0
+
+function think_Main()
+     while true do
+          hook.run("tick")
+          
+          ticksCounter = ticksCounter + 1
+          if ticksCounter > 20 then
+               hook.run("time.onSecond")
+               ticksCounter = 0
+          end
+
+          if stopProgram then
+               print("Stopping!")
+
+               -- Resetting this table so things do not get messy
+               _G._eventsTable = nil
+
+               return
+          end
+
+          os.sleep(0.05)
+     end
+end
+
+function think_Events()
+     while true do
+          local eventInfo = { os.pullEvent() }
+          local event = table.remove(eventInfo, 1)
+
+          hook.run("onEvent", event, unpack(eventInfo))
+          hook.run("onEvent."..event, unpack(eventInfo))
+     end
+end
+
+function startThinking()
+     parallel.waitForAny(think_Main, think_Events)
+end
+
+hook.run("completeReset")

@@ -1,0 +1,106 @@
+os.loadAPI("/disk/libs/ip")
+
+-- <MAC> = {ip = <ip>, expires = <timestamp>}
+leases = {}
+
+settings = {
+     -- Enable dynamic address allocation
+     dynamic = true,
+
+     -- By default, we work in LAN
+     dynamic_ip = {192, 168, 0, 0},
+     dynamic_mask = 24,
+
+     -- TTL of leases in seconds
+     dynamic_ttl = 60,
+
+     -- Once client's lease expires, should we FORCE them to change their IP?
+     -- Recommended: true for WAN, false for LAN
+     dynamic_lazyMode = false,
+
+     -- TTL to return if a lease is expired but we're keeping it
+     dynamic_lazyMode_ttl = 30,
+
+     -- Static leases
+     -- In form of "<MAC>" = <IP>
+     static = {}
+}
+
+-- Returns: success, ip, leaseTime, error
+-- If readonly is true - will return an error if the address does not have an IP instead of creating a lease.
+function getAddressFor(mac, readOnly)
+     -- Return static address if applicable
+     if settings.static[mac] then
+          return true, settings.static[mac], settings.dynamic_ttl, nil
+     end
+
+     -- Return a lease if one exists
+     if leases[mac] then 
+          local ctime = os.clock()
+
+          -- If it is expired and lazy mode is off - force refresh it
+          if ctime > leases[mac].expires and not settings.dynamic_lazyMode then
+               leases[mac] = nil
+               
+               if readOnly then return false, nil, nil, "Lease expired" end
+               
+               return getAddressFor(mac)
+          end
+          
+          local expiryTime = leases[mac].expires - ctime
+          if expiryTime < 0 then expiryTime = settings.dynamic_lazyMode_ttl end
+
+          return true, leases[mac].ip, expiryTime, nil
+     end
+
+     -- If dynamic allocation is off and a device does not have a static address, fail allocation.
+     if not settings.dynamic then return false, nil, nil, "Dynamic IPs disabled" end
+     if readOnly then return false, nil, nil, "No lease exists" end
+
+     -- Converting net IP to integer
+     local integerDynamicIP = ip.ipToInteger(settings.dynamic_ip)
+
+     local IPFound = false
+
+     -- Generate an address using IP and mask
+     -- * Start with 1 instead of 0 because 0 is reserved. For something. Idk.
+     for i = 1, 2 ^ (32 - settings.dynamic_mask) - 1 do
+          local newIPString = ip.IPToString(integerDynamicIP + i)
+          
+          -- Checking if lease with this IP exists
+          local exists = false
+          for mac, lease in pairs(leases) do
+               if lease.ip == newIPString then
+                    exists = true
+                    break
+               end
+          end
+
+          -- Lease with this IP does not exist, creating new one and returning it
+          if not exists then
+               IPFound = true
+               leases[mac] = {
+                    ip = newIPString,
+                    expires = os.clock() + settings.dynamic_ttl
+               }
+
+               print("[I2] DHCP lease created for mac "..mac.." with address "..newIPString)
+
+               return true, newIPString, settings.dynamic_ttl, nil
+          end
+     end
+
+     return false, nil, nil, "No IPs available"
+end
+
+-- Function to be called whenever a NIC disconnects.
+function NICDisconnect(mac)
+     local lease = leases[mac]
+     
+     if lease == nil then return end
+
+     if os.clock() > lease.expires then
+          print("[I2] DHCP lease cleared for mac "..mac)
+          leases[mac] = nil
+     end
+end

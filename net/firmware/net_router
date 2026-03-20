@@ -1,0 +1,5 @@
+os.loadAPI("/disk/libs/events")
+
+os.loadAPI("/disk/net/base/i2_router")
+
+events.startThinking()

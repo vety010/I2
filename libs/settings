@@ -1,0 +1,35 @@
+local SETTINGS_FILE_NAME_PREFIX = "/_settings_"
+
+function set(category, name, value)
+     local fname = SETTINGS_FILE_NAME_PREFIX .. tostring(category or "default")
+     
+     local content = ""
+
+     if fs.exists(fname) then
+          local file = fs.open(fname, "r")
+          content = file.readAll()
+          file.close()
+     end
+
+     local data = textutils.unserialize(content) or {}
+     data[name] = value
+
+     local file = fs.open(fname, "w")
+     content = file.write(textutils.serialize(data))
+     file.close()
+end
+
+function get(category, name)
+     local fname = SETTINGS_FILE_NAME_PREFIX .. tostring(category or "default")
+     
+     if not fs.exists(fname) then
+          return default
+     end
+
+     local file = fs.open(fname, "r")
+     local content = file.readAll()
+     file.close()
+
+     local data = textutils.unserialize(content)
+     return data[name]
+end

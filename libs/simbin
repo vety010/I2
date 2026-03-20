@@ -1,0 +1,207 @@
+-- SIMBIN always uses LITTLE ENDIAN notation for binary and hex operations.
+
+-- Returns true if the given integer is a 1
+local function b(str)
+     return str == "1"
+end
+
+
+
+converters = {}
+converters.binToBool = b
+
+bops = {}
+binaryOperations = bops
+
+-- int         - the number to be converted
+-- maxBits     - maximum number of bits to be written
+--               Note: In Little Endian this cuts off the most significant bits (digits)
+--               It is much better to limit the number elsehow if this behaviour is not something you expect to happen
+-- fullBits    - do not stop if the number is 0 and always write maxBits
+--
+-- Does not support negatives.
+function converters.uintToBin(int, maxBits, fullBits)
+     int = tonumber(int)
+
+     local s = ""
+
+     for i = 1, (maxBits or 128) do
+          s = s .. tostring(int % 2)
+          int = math.floor(int / 2)
+
+          if not fullBits and int <= 0 then break end
+     end
+
+     return s
+end
+
+
+
+-- bin         - the binary string to be converted
+--
+-- Does not support negatives.
+function converters.binToUInt(bin)
+     local int = 0
+     local po2 = 1
+     
+     for i = 1, #bin do
+          int = int + tonumber(bin:sub(i, i)) * po2
+          po2 = po2 * 2
+     end
+
+     return int
+end
+
+
+
+-- Binary inclusive OR
+function bops.b_or(binA, binB)
+     local result = ""
+     
+     for i = 1, math.max(#binA, #binB) do
+          result = result .. ((b(binA:sub(i, i)) or b(binB:sub(i, i))) and "1" or "0")
+     end
+
+     return result
+end
+
+
+
+-- Binary exclusive OR (XOR)
+function bops.b_xor(binA, binB)
+     local result = ""
+     
+     for i = 1, math.max(#binA, #binB) do
+          result = result .. ((b(binA:sub(i, i)) ~= b(binB:sub(i, i))) and "1" or "0")
+     end
+
+     return result
+end
+
+
+
+-- Binary AND 
+function bops.b_and(binA, binB)
+     local result = ""
+     
+     for i = 1, math.max(#binA, #binB) do
+          result = result .. ((b(binA:sub(i, i)) and b(binB:sub(i, i))) and "1" or "0")
+     end
+
+     return result
+end
+
+
+
+-- Binary invert (NOT)
+function bops.b_invert(binA)
+     local result = ""
+     
+     for i = 1, math.max(#binA) do
+          result = result .. (not b(binA:sub(i, i)) and "1" or "0")
+     end
+
+     return result
+end
+
+
+
+---------------------------
+--        HEX
+---------------------------
+
+
+-- int              - the number to be converted
+-- maxHexDigits     - maximum number of hex digit to output
+--                    Note: In Little Endian this cuts off the most significant bits (digits)
+--                    It is much better to limit the number elsehow if this behaviour is not something you expect to happen
+-- fullDigits       - do not stop if the number is 0 and always write maxBits
+--
+-- Converts LE UInt to LE hex (little endian)
+-- Does not support negatives.
+function converters.uintToHex(int, maxHexDigits, fullDigits)
+     int = tonumber(int)
+
+     local s = ""
+
+     for i = 1, (maxHexDigits or 64) do
+          local digit = int % 16
+          
+          if digit > 9 then 
+               digit = digit - 9
+               digit = ("ABCDEF"):sub(digit, digit)
+          end
+          
+          s = s .. tostring(digit)
+          int = math.floor(int / 16)
+
+          if not fullDigits and int <= 0 then break end
+     end
+
+     return s
+end
+
+
+
+-- hex         - the hexademical string to be converted into uint
+--
+-- Does not support negatives.
+function converters.hexToUInt(hex)
+     local int = 0
+     local po16 = 1
+     
+     for i = 1, #hex do
+          local digit = tonumber(hex:sub(i, i))
+          if digit == nil then
+               digit = hex:sub(i, i)
+
+               if digit == "A" then digit = 10
+               elseif digit == "B" then digit = 11
+               elseif digit == "C" then digit = 12
+               elseif digit == "D" then digit = 13
+               elseif digit == "E" then digit = 14
+               elseif digit == "F" then digit = 15 
+               else 
+                    print("[ERROR] Unknown hex digit detected! ("..tostring(digit)..")")
+                    digit = 0 
+               end
+          end
+
+          int = int + digit * po16
+          po16 = po16 * 16
+     end
+
+     return int
+end
+
+
+
+----------------------------------
+--   Simplistic conversions
+----------------------------------
+
+
+-- LE Binary number to LE hexademical number
+function converters.binToHex(bin) return converters.uintToHex(converters.binToUInt(bin)) end
+
+-- LE hexademical number to LE binary number
+function converters.hexToBin(hex) return converters.uintToBin(converters.hexToUInt(hex)) end
+
+
+
+-- Uses stringed types to convert from one type to another
+-- ! Is not optimized to be usually used.
+function dynamicConvert(whatever, fromType, toType)
+     if fromType == toType then return whatever end
+
+     local converterName = string.lower(fromType .. "to" .. toType)
+     
+     for k, v in pairs(converters) do
+          if string.lower(k) == converterName then
+               return v(whatever)
+          end
+     end
+
+     return nil
+end
+converters.dynamicConvert = dynamicConvert

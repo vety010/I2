@@ -1,0 +1,30 @@
+os.loadAPI("/disk/libs/utils")
+
+function ipToInteger(ip)
+     local result = 0
+
+     result = result + bit.blshift(ip[1], 24)
+     result = result + bit.blshift(ip[2], 16)
+     result = result + bit.blshift(ip[3], 8)
+
+     return result + ip[4]
+end
+
+function integerToIP(int)
+     local result = {}
+
+     result[1] = bit.band(bit.brshift(int, 24), 0xFF)
+     result[2] = bit.band(bit.brshift(int, 16), 0xFF)
+     result[3] = bit.band(bit.brshift(int, 8), 0xFF)
+     result[4] = bit.band(bit.brshift(int, 0), 0xFF)
+
+     return result
+end
+
+function IPToString(ip)
+     if type(ip) == "number" then
+          return IPToString(integerToIP(ip))
+     else
+          return utils.concat(ip, ".")
+     end
+end

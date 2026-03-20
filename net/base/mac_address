@@ -1,0 +1,63 @@
+os.loadAPI("/disk/libs/settings")
+os.loadAPI("/disk/libs/simbin")
+
+
+--------------------------------------
+--        MACs:
+-- AA:AA:AA:BB:CC:DE
+-- A - Host ID                | 16777216 hosts total
+-- B - Random                 | 255 variations total
+-- C - Reserved               | Always zero. 
+-- D - Flags (see below)      | 4 flags total
+-- E - Nic Index              | 16 possible NIC indices total
+--------------------------------------
+
+
+--------------------------------------
+--        KNOWN MAC FLAGS:
+-- 0th: 
+--   false = physical device
+--   true = virtual device
+-- 1st: 
+--   false = to-client device
+--   true = meta (routing) device
+--------------------------------------
+
+
+
+-- nicIndex              - Index of the NIC (0-15)
+-- nicID                 - Unique identifying string of this specific NIC. Can be anything, really, even nil.
+-- isVirtual   | FLAG A  - Is the device virtual?
+-- isClient    | FLAG B  - Is the device on the other end supposed to be a client?
+function get(nicIndex, nicID, isVirtual, isClient)
+     local hostID = os.computerID()
+     
+     local random = settings.get("i2.mac", "randomIdentifiers:"..tostring(nicID), nil)
+     
+     if random == nil then
+          random = math.random(0, 255)
+          settings.set("i2.mac", "randomIdentifiers:"..tostring(nicID), random)
+     end
+
+     local flagA = isVirtual and "1" or "0"
+     local flagB = isClient and "1" or "0"
+     local flagC = false and "1" or "0"
+     local flagD = false and "1" or "0"
+
+     local flags = simbin.converters.binToUInt(flagA .. flagB .. flagC .. flagD)
+
+     hostID = simbin.converters.uintToHex(hostID, 6, true)
+     hostID = hostID:sub(1, 2) .. ":" .. hostID:sub(3, 4) .. ":" .. hostID:sub(5, 6)
+
+     random = simbin.converters.uintToHex(random, 2, true)
+     local reserved = simbin.converters.uintToHex(158, 2, true)
+     
+     flags = simbin.converters.uintToHex(flags, 1, true)
+     nicIndex = simbin.converters.uintToHex(nicIndex, 1, true)
+
+     return hostID .. ":" .. random .. ":" .. reserved .. ":" .. flags .. nicIndex
+end
+
+print(get(12, "top", false, false))
+print(get(3, "bottom", false, true))
+print(get(4, "router1", true, false))

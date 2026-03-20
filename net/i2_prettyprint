@@ -1,0 +1,42 @@
+os.loadAPI("/disk/libs/hook")
+
+-- Requires Events lib
+-- TODO: tables pretty print
+-- TODO: interactive UI
+
+function printGeneral(device, i2)
+     local _y = 0
+     local function writeNL(text)
+          _y = _y + 1
+          device.setCursorPos(1, _y)
+          device.write(text)
+     end
+     device.setTextScale(0.5)
+
+     device.clear()
+
+     local ctime = os.clock()
+
+     writeNL("Device "..(i2.MAC or "(NO MAC)").." status page | UPTIME: "..ctime.." seconds")
+     writeNL("NICs:")
+     -- Print out masters first
+     for side, NIC in pairs(i2.networkCards) do
+          if NIC.isUpstream then
+               writeNL("\t MASTER NIC @ "..side.." (connected MAC: "..(NIC.mac or "(NO MAC)")..")")
+          end
+     end
+     -- Then slaves
+     for side, NIC in pairs(i2.networkCards) do
+          if not NIC.isUpstream then
+               writeNL("\t SLAVE NIC @ "..side.." (connected MAC: "..(NIC.mac or "(NO MAC)")..")")
+          end
+     end
+     writeNL("DHCP leases:")
+     for mac, lease in pairs(i2.dhcp.leases) do
+          writeNL("\tLease to "..mac..": IP="..lease.ip..", expires in "..(lease.expires - ctime).." seconds")
+     end
+end
+
+hook.add("onEvent.monitor_touch", "i2_prettyprint", function(...)
+     print(...)
+end)

@@ -1,0 +1,56 @@
+os.loadAPI("/disk/libs/utils")
+
+_G._eventsTable = _G._eventsTable or {}
+
+function addHookList(name)
+     local all = _G._eventsTable
+     local suffixArr = utils.split(name, ":")
+     if #suffixArr > 1 then
+          table.remove(suffixArr, #suffixArr)
+          addHookList(utils.concat(suffixArr, ":"))
+     end
+     
+     all[name] = all[name] or {}
+end
+
+function add(name, id, callback)
+     local all = _G._eventsTable
+
+     addHookList(name)
+     all[name][id] = callback
+end
+
+function remove(name, id)
+     add(name, id, nil)
+end
+
+function run(name, ...)
+     local all = _G._eventsTable
+
+     if not all[name] then return end
+
+     run(name..":pre", ...)
+     
+     for k, v in pairs(all[name]) do
+          if v(...) == "_preventPropagation" then break end
+     end
+
+     run(name..":post", ...)
+end
+
+function resetAll()
+     local all = _G._eventsTable
+     local keys = {}
+
+     for name, _ in pairs(all) do
+          table.insert(keys, name)
+     end
+
+     for k, v in ipairs(keys) do
+          all[v] = nil
+     end
+
+     add("completeReset:post", "_hookResetter", resetAll)
+end
+
+add("completeReset:post", "_hookResetter", resetAll)

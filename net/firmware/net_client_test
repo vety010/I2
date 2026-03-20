@@ -1,0 +1,38 @@
+os.loadAPI("/disk/libs/hook")
+os.loadAPI("/disk/libs/events")
+
+os.loadAPI("/disk/net/base/i2_switch")
+
+function testPacket(response, nextHop, body)
+     i2_switch.onPacket(nil, response and "A" or "R", nil, nextHop, nil, body)
+end
+
+hook.add("onEvent.key", "i2.test", function(key)
+     print("Emitting an event: "..key)
+     testPacket(false, "tB5Ggrek", "keypress "..key)
+end)
+
+-- To be called whenever this device received a packet
+function i2_switch.callbacks.onInboundPacket(fromNIC, packetType, source, nextHop, destination, body)
+     print("["..packetType.."] from "..(source or "[no ip]").." to "..(destination or "[no ip]")..": "..body)
+
+     -- We received an inbound request packet that has us as the destination. That, usually, means a request to us.
+     if packetType == "R" then
+          hook.run("i2.request", src, srcPort, dst, dstPort, body)
+          return
+     end
+
+     -- We received an inbound response packet that originated from us. That, usually, means a response for us.
+     if packetType == "A" then
+          hook.run("i2.response", src, srcPort, dst, dstPort, body)
+          return
+     end
+     
+     -- We received an inbound error packet that originated from us. That, usually, means an error that wsa returned to us.
+     if packetType == "E" then
+          hook.run("i2.error", src, srcPort, dst, dstPort, body)
+          return
+     end
+end
+
+events.startThinking()
