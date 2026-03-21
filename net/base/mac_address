@@ -9,7 +9,7 @@ os.loadAPI("/disk/libs/simbin")
 -- B - Random                 | 255 variations total
 -- C - Reserved               | Always zero. 
 -- D - Flags (see below)      | 4 flags total
--- E - Nic Index              | 16 possible NIC indices total
+-- E - NIC Index              | 16 possible NIC indices total
 --------------------------------------
 
 
@@ -58,6 +58,12 @@ function get(nicIndex, nicID, isVirtual, isClient)
      return hostID .. ":" .. random .. ":" .. reserved .. ":" .. flags .. nicIndex
 end
 
-print(get(12, "top", false, false))
-print(get(3, "bottom", false, true))
-print(get(4, "router1", true, false))
+function toHex(mac)
+     return mac:sub(1,2) .. mac:sub(4,5) .. mac:sub(7,8) .. mac:sub(10,11) .. mac:sub(13,14) .. mac:sub(16,17)
+end
+
+function fromHex(hex)
+     return hex:sub(1,2) .. ":" .. hex:sub(3,4) .. ":" .. hex:sub(5,6) .. ":" .. hex:sub(7,8) .. ":" .. hex:sub(9,10) .. ":" .. hex:sub(11,12)
+end
+
+zero = "00:00:00:00:00:00"

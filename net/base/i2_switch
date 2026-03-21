@@ -1,126 +1,68 @@
 os.loadAPI("/disk/libs/utils")
 os.loadAPI("/disk/libs/hook")
-os.loadAPI("/disk/libs/ip")
 
 os.loadAPI("/disk/net/base/i2_nics")
-os.loadAPI("/disk/net/base/mac_address")
 
--- Packet syntax:
--- SRC, DST - either IP or MAC
--- TYPE - Type of packet (C means the packet must be delivered to a client, rerouted or dropped - a switch cannot consume it): 
+-- Frame syntax:
+-- SRC, DST - Source/Destination MACs 
+-- TYPE - Type of frame (C means the frame must be delivered to a client, rerouted or dropped - a switch cannot consume it): 
 --        C R for request, 
 --        C A for response, 
 --        C E for error (for example, unable to find route), 
 --          S for system, 
 --          C for config,
 --          B for broadcast, 
---          M for MAC sharing REQUEST
---          N for MAC sharing RESPONSE
--- TYPE>SRC:SRC_PORT>NEXT_HOP_MAC>DST:DST_PORT>PACKET
+--          M for MAC discovery (LLDP)
+-- TYPE>SRC:SRC_PORT>DST:DST_PORT>FRAME
 
 -- Making NIC manager accessible
 i2_nics = i2_nics
--- Reading or creating MAC address
-MAC = mac_address.get()
 
-print("[I2] SWITCH UP | MAC "..MAC)
-
-function init()
-     print("[I2] Booting (MAC: "..MAC..")...")
-     updateNICs()
-end
-
-function sendMAC(response, viaNIC)
-     onPacket(nil, response and "N" or "M", nil, viaNIC:getOpponentsMAC(), nil, MAC)
-end
+print("[I2] SWITCH UP")
 
 -- This object contains callbacks because otherwise we have no way of safely overriding them.
 callbacks = {}
 
--- To be called whenever the device receives a packet to self
-function callbacks.onInboundPacket(fromNIC, packetType, source, nextHop, destination, packet)
-     -- Nothing. A switch does not normally expect a packet.
+-- To be called whenever the device forwards a frame to another device
+function callbacks.onForwardedFrame(fromNIC, toNIC, frameType, source, destination, frame)
+     toNIC:send(fromNIC, frameType, source, destination, frame)
 end
 
--- To be called whenever the device sends a packet from self
-function callbacks.onOutboundPacket(toNIC, packetType, source, nextHop, destination, packet) 
-     toNIC:send(nil, packetType, source, nextHop, destination, packet)
-end
+-- NIC:        NIC __FROM__ which we received the frame. Nil if originating from this device.
+-- frameType: See above.
+-- frame:     The frame body
 
--- To be called whenever the device forwards a packet to another device
-function callbacks.onForwardedPacket(fromNIC, toNIC, packetType, source, nextHop, destination, packet)
-     toNIC:send(fromNIC, packetType, source, nextHop, destination, packet)
-end
-
--- NIC:        NIC __FROM__ which we received the packet. Nil if originating from this device.
--- packetType: See above.
--- nextHop:    The next hop's MAC address.
--- packet:     The packet's body
-
--- Called when the switch needs to forward a packet
-function onPacket(NIC, packetType, source, nextHop, destination, packet)
-     -- If we received this packet and its MAC exchange (ARP) packet...
-     if NIC and (packetType == "M" or packetType == "N") then
-          -- MAC collision. Or faulty network. You call it
-          if packet == MAC then return end
-          
-          -- Write down opponent's MAC
-          NIC:setOpponentsMAC(packet)
-
-          -- Log it
-          print("[I2] Neighbour's MAC on interface "..NIC.side..": "..tostring(NIC:getOpponentsMAC()))
-
-          -- And send ours if we haven't yet.
-          if packetType == "M" then
-               sendMAC(true, NIC)
-          end
-
-          return
-     end
-
-     if nextHop == MAC then
-          return callbacks.onInboundPacket(NIC, packetType, source, nextHop, destination, packet)
-     end
+-- Called when the switch needs to forward a frame
+function onFrame(NIC, frameType, source, destination, frame)
+     -- Get MAc address of the NIC
+     local MAC = NIC:getMAC()
 
      local nextNIC
 
      -- Iterate over all NICs
      for side, NIC in pairs(i2_nics.getAll()) do
-          if nextHop and NIC:getOpponentsMAC() == nextHop then
+          if NIC:getOpponentsMAC() == destination then
                nextNIC = NIC
                break
           end
      end
      
-     -- Broadcast the packet (except to the origin port) if we have no idea where to put it lol. switches are weird :P
+     -- Broadcast the frame (except to the origin port) if we have no idea where to put it lol. switches are weird :P
      if not nextNIC then
           for side, nextNIC in pairs(i2_nics.getAll()) do
                if nextNIC ~= NIC then
-                    if NIC == nil then
-                         callbacks.onOutboundPacket(nextNIC, packetType, source, nextHop, destination, packet)
-                    else
-                         callbacks.onForwardedPacket(NIC, nextNIC, packetType, source, nextHop, destination, packet)
-                    end
+                    callbacks.onForwardedFrame(NIC, nextNIC, frameType, source, destination, frame)
                end
           end
 
           return
      end
 
-     if NIC == nil then
-          return callbacks.onOutboundPacket(nextNIC, packetType, source, nextHop, destination, packet)
-     else
-          return callbacks.onForwardedPacket(NIC, nextNIC, packetType, source, nextHop, destination, packet)
-     end
+     return callbacks.onForwardedFrame(NIC, nextNIC, frameType, source, destination, frame)
 end
 
 hook.add("onEvent.key", "i2.quit", function(key)
      if key == 16 then os.exit() end
 end)
 
-hook.add("i2.NICs.inbound_packet", "i2.switch.inbound", function(...) onPacket(...) end)
-
-hook.add("i2.NICs.registered", "i2.switch.sendARP", function(side, NIC)
-     -- Sending initializing ARP packet
-     sendMAC(false, NIC)
-end)
+hook.add("i2.NICs.inbound_frame", "i2.switch.inbound", function(...) onFrame(...) end)

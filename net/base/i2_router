@@ -1,10 +1,5 @@
-os.loadAPI("/disk/net/base/mac_address")
-
 -- Loading switch
 os.loadAPI("/disk/net/base/i2_switch")
-
--- Reading or creating MAC address
-MAC = mac_address.get()
 
 -- Creating NIC for the router
 local NICManager = i2_switch.i2_nics

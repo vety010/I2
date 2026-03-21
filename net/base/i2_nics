@@ -1,10 +1,12 @@
+os.loadAPI("/disk/net/base/mac_address")
+
 local metatable = {}
 local existingNICs = {}
 
 local I2_CHANNEL = 0
 
 -- HOOKS:
---   i2.NICs.inbound_packet   -- called whenever a NIC has received inbound traffic
+--   i2.NICs.inbound_frame   -- called whenever a NIC has received inbound traffic
 --   i2.NICs.registered       -- called whenever a NIC was registered
 --   i2.NICs.unregistered     -- called whenever a NIC was unregistered
 
@@ -13,8 +15,9 @@ local I2_CHANNEL = 0
 ---------------------------------
 
 -- If isVirtual is true, side actually acts as the ID of the virtual interface
-function metatable:initialize(isVirtual, side)
+function metatable:initialize(isVirtual, side, index)
      self.virtual = isVirtual
+     self.index = index
      
      if not isVirtual then
           self.peripheral = peripheral.wrap(side)
@@ -40,23 +43,39 @@ function metatable:getOpponentsMAC()
      return self.link_mac
 end
 
--- Sends a packet via this NIC, also has the origin NIC for routing purposes
+-- Returns the NIC's MAC address
+function metatable:getMAC()
+     if not self.mac then
+          -- TODO: proper isClient flag
+          self.mac = mac_address.get(self.index, self.side, self.virtual, not self.virtual)
+     end
+
+     return self.mac
+end
+
+-- nic RECEIVES from internal and *SENDS* to another computer
+-- Sends a frame via this NIC, also has the origin NIC for routing purposes
 -- To be overridden.
-function metatable:send(originNIC, packetType, source, nextHop, destination, packet)
+function metatable:send(originNIC, frameType, source, destination, frame)
      if self.virtual then return end
-
-     self.peripheral.transmit(I2_CHANNEL, I2_CHANNEL, self:packPacket(packetType, source, nextHop, destination, packet))
+     
+     self.peripheral.transmit(I2_CHANNEL, I2_CHANNEL, self:packFrame(frameType, source, destination, frame))
 end
 
--- Whenever this NIC receives an external packet
--- Usually should not be overridden
-function metatable:receive(packetType, src, nextHop, dst, body)
-     hook.run("i2.NICs.inbound_packet", self, packetType, src, nextHop, dst, body)
+-- nic SENDS to internal as a result of *RECEIVING* from another computer
+-- Whenever this NIC receives an external frame
+function metatable:receive(frameType, src, dst, body)
+     hook.run("i2.NICs.inbound_frame", self, frameType, src, dst, body)
 end
 
--- Packs packet data into the formatted string
-function metatable:packPacket(packetType, source, nextHop, destination, packet)
-     return tostring(packetType or "-") .. ">" .. tostring(source or "-") .. ">" .. tostring(nextHop or "-") .. ">" .. tostring(destination or "-") .. ">" .. tostring(packet or "")
+-- Packs frame data into the formatted string
+function metatable:packFrame(frameType, source, destination, frame)
+     return tostring(frameType and frameType:sub(1,1) or "-") .. tostring(mac_address.toHex(source or mac_address.zero)) .. tostring(mac_address.toHex(destination or mac_address.zero)) .. tostring(frame or "")
+end
+
+-- Sends MAC discovery packet
+function metatable:shareMAC()
+     self:send(nil, "M", self:getMAC(), self:getOpponentsMAC(), nil)
 end
 
 metatable.__index = metatable
@@ -64,6 +83,8 @@ metatable.__index = metatable
 ---------------------------------------
 --   GLOBAL NIC HANDLING FUNCTIONS   --
 ---------------------------------------
+
+local NICIndexCounter = 0
 
 function getAll()
      return existingNICs
@@ -98,7 +119,7 @@ function updateNICs()
 end
 
 function registerNIC(side, isVirtual)
-     print("[I2] Registering NIC: "..side)
+     print("[I2] Registering NIC #"..NICIndexCounter..": "..side)
 
      if getAtSide(side) then 
           unregisterNIC(side)
@@ -107,7 +128,11 @@ function registerNIC(side, isVirtual)
      -- Creating a NIC object
      local NIC = {}
      setmetatable(NIC, metatable)
-     NIC:initialize(isVirtual, side)
+     NIC:initialize(isVirtual, side, NICIndexCounter)
+
+     print("[I2] NIC #"..NICIndexCounter..": "..NIC:getMAC())
+
+     NICIndexCounter = NICIndexCounter + 1
 
      hook.run("i2.NICs.registered", side, NIC)
 
@@ -126,24 +151,31 @@ end
 
 hook.add("tick", "i2.NICs.peripheral_check", updateNICs)
 
+hook.add("i2.NICs.registered", "i2.MAC.discovery", function(side, NIC)
+     NIC:shareMAC()
+end)
+
 hook.add("onEvent.modem_message", "i2.NIC.receive", function(side, channel, replyChannel, message, distance)
      if channel ~= I2_CHANNEL or replyChannel ~= I2_CHANNEL then return end
 
-     local packetData = utils.split(message, ">")
-
-     local packetType, src, nextHop, dst = unpack(packetData)
-
-     if src == "-" then src = nil end
-     if nextHop == "-" then nextHop = nil end
-     if dst == "-" then dst = nil end
-
-     local body = ""
-     for i = 5, #packetData do
-          body = body .. packetData[i] .. (i == #packetData and "" or ">")
-     end
-
+     local frameType = message:sub(1,1)
+     local source = mac_address.fromHex(message:sub(2,13))
+     local destination = mac_address.fromHex(message:sub(14,25))
+     local body = message:sub(26)
+     
      local NIC = existingNICs[side]
      if NIC then
-          NIC:receive(packetType, src, nextHop, dst, body)
+          if frameType == "M" then
+               print("[I2] "..(destination == mac_address.zero and "REQ" or "RES").." Opponent's mac on side "..side.." is: "..source)
+               NIC:setOpponentsMAC(source)
+     
+               if destination == mac_address.zero then
+                    NIC:shareMAC()
+               end
+
+               return
+          end
+          
+          NIC:receive(frameType, source, destination, body)
      end
 end)
