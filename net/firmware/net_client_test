@@ -1,24 +1,34 @@
 os.loadAPI("/disk/libs/hook")
 os.loadAPI("/disk/libs/events")
 
-os.loadAPI("/disk/net/base/i2_switch")
+os.loadAPI("/disk/net/base/i2_nics")
 
 -- Creating NIC for the router
-local NICManager = i2_switch.i2_nics
-local clientNIC = NICManager.registerNIC("virtual_client", true)
-
-function clientNIC:send(originNIC, frameType, source, destination, frame)
-     print("||", "\t", frameType, "\t", source, "\t", destination, "\t", frame)
-end
+local NICManager = i2_nics
 
 function testFrame(response, destination, body)
      -- i2_switch.onFrame(nil, response and "A" or "R", nil, nil, body)
-     clientNIC:receive(response and "A" or "R", clientNIC:getMAC(), destination, body)
+     local NIC = NICManager.getAny()
+     if not NIC then return print("No network connected") end
+
+     NIC:send(nil, response and "A" or "R", NIC:getMAC(), destination, 0, body)
 end
+
+hook.add("i2.NICs.inbound_frame", "i2.client_test", function(originNIC, frameType, source, destination, vlan, frame)
+     print("||", "\t", frameType, "\t", source, "\t", destination, "\t", vlan, "\t", frame)
+     
+     if frameType == "R" then
+          testFrame(true, source, "ACK "..frame)
+     end
+end)
 
 hook.add("onEvent.key", "i2.test", function(key)
      print("Emitting an event: "..key)
      testFrame(false, "F2:00:00:5D:E9:10", "keypress "..key)
+end)
+
+hook.add("onEvent.key", "i2.quit", function(key)
+     if key == 16 then os.exit() end
 end)
 
 events.startThinking()

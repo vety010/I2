@@ -1,3 +1,4 @@
+os.loadAPI("/disk/libs/simbin")
 os.loadAPI("/disk/net/base/mac_address")
 
 local metatable = {}
@@ -56,26 +57,30 @@ end
 -- nic RECEIVES from internal and *SENDS* to another computer
 -- Sends a frame via this NIC, also has the origin NIC for routing purposes
 -- To be overridden.
-function metatable:send(originNIC, frameType, source, destination, frame)
+function metatable:send(originNIC, frameType, source, destination, vlan, frame)
      if self.virtual then return end
      
-     self.peripheral.transmit(I2_CHANNEL, I2_CHANNEL, self:packFrame(frameType, source, destination, frame))
+     self.peripheral.transmit(I2_CHANNEL, I2_CHANNEL, self:packFrame(frameType, source, destination, vlan, frame))
 end
 
 -- nic SENDS to internal as a result of *RECEIVING* from another computer
 -- Whenever this NIC receives an external frame
-function metatable:receive(frameType, src, dst, body)
-     hook.run("i2.NICs.inbound_frame", self, frameType, src, dst, body)
+function metatable:receive(frameType, src, dst, vlan, body)
+     hook.run("i2.NICs.inbound_frame", self, frameType, src, dst, vlan, body)
 end
 
 -- Packs frame data into the formatted string
-function metatable:packFrame(frameType, source, destination, frame)
-     return tostring(frameType and frameType:sub(1,1) or "-") .. tostring(mac_address.toHex(source or mac_address.zero)) .. tostring(mac_address.toHex(destination or mac_address.zero)) .. tostring(frame or "")
+function metatable:packFrame(frameType, source, destination, vlan, frame)
+     return tostring(frameType and frameType:sub(1,1) or "-") .. 
+          tostring(mac_address.toHex(source or mac_address.zero)) .. 
+          tostring(mac_address.toHex(destination or mac_address.zero)) .. 
+          tostring(simbin.converters.uintToHex(vlan or 0, 3, true)) .. 
+          tostring(frame or "")
 end
 
 -- Sends MAC discovery packet
 function metatable:shareMAC()
-     self:send(nil, "M", self:getMAC(), self:getOpponentsMAC(), nil)
+     self:send(nil, "M", self:getMAC(), self:getOpponentsMAC(), nil, nil)
 end
 
 metatable.__index = metatable
@@ -149,6 +154,12 @@ function unregisterNIC(side)
      hook.run("i2.NICs.unregistered", side)
 end
 
+function getAny()
+     for k, v in pairs(getAll()) do
+          return v
+     end
+end
+
 hook.add("tick", "i2.NICs.peripheral_check", updateNICs)
 
 hook.add("i2.NICs.registered", "i2.MAC.discovery", function(side, NIC)
@@ -161,7 +172,8 @@ hook.add("onEvent.modem_message", "i2.NIC.receive", function(side, channel, repl
      local frameType = message:sub(1,1)
      local source = mac_address.fromHex(message:sub(2,13))
      local destination = mac_address.fromHex(message:sub(14,25))
-     local body = message:sub(26)
+     local vlan = simbin.converters.hexToUInt(message:sub(26,28)) or 0
+     local body = message:sub(29)
      
      local NIC = existingNICs[side]
      if NIC then
@@ -176,6 +188,6 @@ hook.add("onEvent.modem_message", "i2.NIC.receive", function(side, channel, repl
                return
           end
           
-          NIC:receive(frameType, source, destination, body)
+          NIC:receive(frameType, source, destination, vlan, body)
      end
 end)

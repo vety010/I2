@@ -13,7 +13,15 @@ os.loadAPI("/disk/net/base/i2_nics")
 --          C for config,
 --          B for broadcast, 
 --          M for MAC discovery (LLDP)
--- TYPE>SRC:SRC_PORT>DST:DST_PORT>FRAME
+-- TYPE SRC DST VLAN FRAME
+
+config = {
+     -- 0 for primitive
+     -- 1 for simple
+     -- 2 for advanced
+     -- 3 for managed
+     switch_type = 0
+}
 
 -- Making NIC manager accessible
 i2_nics = i2_nics
@@ -24,8 +32,8 @@ print("[I2] SWITCH UP")
 callbacks = {}
 
 -- To be called whenever the device forwards a frame to another device
-function callbacks.onForwardedFrame(fromNIC, toNIC, frameType, source, destination, frame)
-     toNIC:send(fromNIC, frameType, source, destination, frame)
+function callbacks.onForwardedFrame(fromNIC, toNIC, frameType, source, destination, vlan, frame)
+     toNIC:send(fromNIC, frameType, source, destination, vlan, frame)
 end
 
 -- NIC:        NIC __FROM__ which we received the frame. Nil if originating from this device.
@@ -33,36 +41,26 @@ end
 -- frame:     The frame body
 
 -- Called when the switch needs to forward a frame
-function onFrame(NIC, frameType, source, destination, frame)
+function onFrame(fromNIC, frameType, source, destination, vlan, frame)
      -- Get MAc address of the NIC
-     local MAC = NIC:getMAC()
+     local MAC = fromNIC:getMAC()
 
-     local nextNIC
-
-     -- Iterate over all NICs
-     for side, NIC in pairs(i2_nics.getAll()) do
-          if NIC:getOpponentsMAC() == destination then
-               nextNIC = NIC
-               break
+     -- Only enable MAC lookups for simple switches or above.
+     if config.switch_type >= 1 then
+          -- Iterate over all NICs, find one that has MAC of the recepient
+          for side, nextNIC in pairs(i2_nics.getAll()) do
+               if nextNIC:getOpponentsMAC() == destination then
+                    return callbacks.onForwardedFrame(fromNIC, nextNIC, frameType, source, destination, vlan, frame)
+               end
           end
      end
      
      -- Broadcast the frame (except to the origin port) if we have no idea where to put it lol. switches are weird :P
-     if not nextNIC then
-          for side, nextNIC in pairs(i2_nics.getAll()) do
-               if nextNIC ~= NIC then
-                    callbacks.onForwardedFrame(NIC, nextNIC, frameType, source, destination, frame)
-               end
+     for side, nextNIC in pairs(i2_nics.getAll()) do
+          if nextNIC ~= fromNIC then
+               callbacks.onForwardedFrame(fromNIC, nextNIC, frameType, source, destination, vlan, frame)
           end
-
-          return
      end
-
-     return callbacks.onForwardedFrame(NIC, nextNIC, frameType, source, destination, frame)
 end
-
-hook.add("onEvent.key", "i2.quit", function(key)
-     if key == 16 then os.exit() end
-end)
 
 hook.add("i2.NICs.inbound_frame", "i2.switch.inbound", function(...) onFrame(...) end)
