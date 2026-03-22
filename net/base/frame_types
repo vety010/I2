@@ -1,0 +1,25 @@
+types = {}
+types_reverse = {}
+
+function registerFrameType(value, name)
+     types[name] = value
+     types_reverse[value] = name
+end
+
+
+registerFrameType(0x0800, "ipv4")
+registerFrameType(0x0806, "arp")
+registerFrameType(0x88CC, "lldp")
+
+registerFrameType(0x88BF, "i2_cfg") -- analogous to MikroTik ROMON
+
+registerFrameType(0xFFE6, "test") -- Protocol designed for test messages
+
+
+function getTypeFromInt(int)
+     return types_reverse[int]
+end
+
+function getIntFromType(type)
+     return types[type]  
+end

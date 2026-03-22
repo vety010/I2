@@ -176,6 +176,34 @@ end
 
 
 
+-- string           - the string to be converted into Hex
+function converters.stringToHex(str)
+     local result = ""
+
+     for i = 1, #str do
+          local int = string.byte(str, i)
+          result = result .. converters.uintToHex(int)
+     end
+
+     return result
+end
+
+
+
+-- hex              - the hexadecimal-encoded string to be converted into string
+function converters.hexToString(hex)
+     local result = ""
+
+     for i = 1, #hex, 2 do
+          local int = converters.hexToUInt(hex:sub(i, i+1))
+          result = result .. string.char(int)
+     end
+
+     return result
+end
+
+
+
 ----------------------------------
 --   Simplistic conversions
 ----------------------------------
@@ -205,3 +233,19 @@ function dynamicConvert(whatever, fromType, toType)
      return nil
 end
 converters.dynamicConvert = dynamicConvert
+
+
+
+-----------------------------------------
+--   Network-specific
+-----------------------------------------
+
+
+-- Calculates Frame Check Sequence for a given hexadecimal string.
+function calculateFCS(str)
+     local frameCheckSequence = 0
+     for i = 1, #str, 4 do
+          frameCheckSequence = frameCheckSequence + converters.hexToUInt(str:sub(i, i+3))
+     end
+     return converters.uintToHex(frameCheckSequence, 8, true)
+end

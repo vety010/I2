@@ -1,11 +1,6 @@
 -- Loading switch
-os.loadAPI("/disk/net/base/i2_switch")
+os.loadAPI("/disk/net/base/i2_nics")
 
--- Creating NIC for the router
-local NICManager = i2_switch.i2_nics
-local routerNIC = NICManager.registerNIC("virtual_router", true)
-
--- TODO: router must have: DHCP (server / proxy), routing table rules, upstream/downstream port setup
-function routerNIC:send(originNIC, packetType, source, nextHop, destination, packet)
+hook.add("i2.NICs.inbound_frame", "i2.routing", function(fromNIC, frameType, source_mac, destination_mac, vlan, packet)
      
-end
+end)

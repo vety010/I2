@@ -6,25 +6,27 @@ os.loadAPI("/disk/net/base/i2_nics")
 -- Creating NIC for the router
 local NICManager = i2_nics
 
-function testFrame(response, destination, body)
+function testFrame(destination, body)
      -- i2_switch.onFrame(nil, response and "A" or "R", nil, nil, body)
      local NIC = NICManager.getAny()
      if not NIC then return print("No network connected") end
 
-     NIC:send(nil, response and "A" or "R", NIC:getMAC(), destination, 0, body)
+     NIC:send(nil, NIC:getMAC(), destination, 0, "test", body)
 end
 
-hook.add("i2.NICs.inbound_frame", "i2.client_test", function(originNIC, frameType, source, destination, vlan, frame)
-     print("||", "\t", frameType, "\t", source, "\t", destination, "\t", vlan, "\t", frame)
+hook.add("i2.NICs.inbound_frame", "i2.client_test", function(originNIC, source, destination, vlan, frameType, frame)
+     if destination ~= originNIC:getMAC() then return end 
+
+     print("||", "\t", source, "\t", destination, "\t", vlan, "\t", frameType, "\t", frame)
      
-     if frameType == "R" then
-          testFrame(true, source, "ACK "..frame)
+     if frameType == "test" and frame:sub(1,3) ~= "ACK" then
+          testFrame(source, "ACK "..frame)
      end
 end)
 
 hook.add("onEvent.key", "i2.test", function(key)
      print("Emitting an event: "..key)
-     testFrame(false, "F2:00:00:5D:E9:10", "keypress "..key)
+     testFrame("03:00:00:43:E9:20", "keypress "..key)
 end)
 
 hook.add("onEvent.key", "i2.quit", function(key)

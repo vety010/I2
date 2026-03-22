@@ -1,5 +1,6 @@
 os.loadAPI("/disk/libs/simbin")
 os.loadAPI("/disk/net/base/mac_address")
+os.loadAPI("/disk/net/base/frame_types")
 
 local metatable = {}
 local existingNICs = {}
@@ -57,30 +58,39 @@ end
 -- nic RECEIVES from internal and *SENDS* to another computer
 -- Sends a frame via this NIC, also has the origin NIC for routing purposes
 -- To be overridden.
-function metatable:send(originNIC, frameType, source, destination, vlan, frame)
+function metatable:send(originNIC, source, destination, vlan, frameType, frame)
      if self.virtual then return end
+
+     local frameString = self:packFrame(source, destination, vlan, frameType, frame)
+     -- print(simbin.converters.hexToString(frameString))
      
-     self.peripheral.transmit(I2_CHANNEL, I2_CHANNEL, self:packFrame(frameType, source, destination, vlan, frame))
+     self.peripheral.transmit(I2_CHANNEL, I2_CHANNEL, frameString)
 end
 
 -- nic SENDS to internal as a result of *RECEIVING* from another computer
 -- Whenever this NIC receives an external frame
-function metatable:receive(frameType, src, dst, vlan, body)
-     hook.run("i2.NICs.inbound_frame", self, frameType, src, dst, vlan, body)
+function metatable:receive(src, dst, vlan, frameType, body)
+     hook.run("i2.NICs.inbound_frame", self, src, dst, vlan, frameType, body)
 end
 
 -- Packs frame data into the formatted string
-function metatable:packFrame(frameType, source, destination, vlan, frame)
-     return tostring(frameType and frameType:sub(1,1) or "-") .. 
-          tostring(mac_address.toHex(source or mac_address.zero)) .. 
+function metatable:packFrame(source, destination, vlan, frameType, frame)
+     local frameTypeInt = frame_types.getIntFromType(frameType) or 0xFFFF
+
+     local intermediateFrame = tostring(mac_address.toHex(source or mac_address.zero)) .. 
           tostring(mac_address.toHex(destination or mac_address.zero)) .. 
           tostring(simbin.converters.uintToHex(vlan or 0, 3, true)) .. 
-          tostring(frame or "")
+          tostring(simbin.converters.uintToHex(frameTypeInt, 4, true)) .. 
+          tostring(simbin.converters.stringToHex(frame or ""))
+
+     return 
+          intermediateFrame ..
+          tostring(simbin.calculateFCS(intermediateFrame, 8, true))
 end
 
 -- Sends MAC discovery packet
 function metatable:shareMAC()
-     self:send(nil, "M", self:getMAC(), self:getOpponentsMAC(), nil, nil)
+     self:send(nil, self:getMAC(), self:getOpponentsMAC(), nil, "lldp", nil)
 end
 
 metatable.__index = metatable
@@ -169,25 +179,40 @@ end)
 hook.add("onEvent.modem_message", "i2.NIC.receive", function(side, channel, replyChannel, message, distance)
      if channel ~= I2_CHANNEL or replyChannel ~= I2_CHANNEL then return end
 
-     local frameType = message:sub(1,1)
-     local source = mac_address.fromHex(message:sub(2,13))
-     local destination = mac_address.fromHex(message:sub(14,25))
-     local vlan = simbin.converters.hexToUInt(message:sub(26,28)) or 0
-     local body = message:sub(29)
+     local source =             mac_address.fromHex(message:sub(1,12))
+     local destination =        mac_address.fromHex(message:sub(13,24))
+     local vlan =               simbin.converters.hexToUInt(message:sub(25,27)) or 0
+     local frameTypeInt =       simbin.converters.hexToUInt(message:sub(28, 31))
+     
+     -- Packet body
+     local body = simbin.converters.hexToString(message:sub(32, #message - 8))
+
+     -- FCS as received (hexadecimal, string)
+     local frameCheckSequence_expected = message:sub(#message - 7)
+     -- FCS as calculated
+     local frameCheckSequence_received = simbin.calculateFCS(message:sub(1, #message - 8))
+
+     if frameCheckSequence_received ~= frameCheckSequence_expected then
+          print("Received a malformed frame!")
+          return
+     end
+
+     -- Converting back from offsetted 
+     local frameType = frame_types.getTypeFromInt(frameTypeInt) or "unknown"
      
      local NIC = existingNICs[side]
-     if NIC then
-          if frameType == "M" then
-               print("[I2] "..(destination == mac_address.zero and "REQ" or "RES").." Opponent's mac on side "..side.." is: "..source)
-               NIC:setOpponentsMAC(source)
-     
-               if destination == mac_address.zero then
-                    NIC:shareMAC()
-               end
+     if not NIC then return end
 
-               return
+     if frameType == "lldp" then
+          print("[I2] "..(destination == mac_address.zero and "REQ" or "RES").." Opponent's mac on side "..side.." is: "..source)
+          NIC:setOpponentsMAC(source)
+
+          if destination == mac_address.zero then
+               NIC:shareMAC()
           end
-          
-          NIC:receive(frameType, source, destination, vlan, body)
+
+          return
      end
+
+     NIC:receive(source, destination, vlan, frameType, body)
 end)
